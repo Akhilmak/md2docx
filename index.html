@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Markdown to DOCX</title>
+  <link rel="stylesheet" href="css/app.css">
+  <script type="importmap">
+  {
+    "imports": {
+      "marked": "https://cdn.jsdelivr.net/npm/marked@15.0.12/+esm",
+      "docx": "https://cdn.jsdelivr.net/npm/docx@9.11.0/+esm",
+      "docx-preview": "https://cdn.jsdelivr.net/npm/docx-preview@0.4.1/+esm"
+    }
+  }
+  </script>
+  <script type="module" src="js/app.js"></script>
+</head>
+<body>
+  <header class="topbar">
+    <h1>Markdown → DOCX</h1>
+    <label class="fname">File name
+      <input id="filename" type="text" value="document" maxlength="100" spellcheck="false">
+      <span>.docx</span>
+    </label>
+    <button id="download" class="primary" disabled>Download DOCX</button>
+  </header>
+
+  <div id="status" class="status" role="status" aria-live="polite">Loading libraries…</div>
+
+  <main class="layout">
+    <section class="pane editor-pane" aria-label="Markdown input">
+      <div class="pane-head">
+        <h2>Markdown</h2>
+        <div class="tools">
+          <label class="btn">Upload .md<input id="upload" type="file" accept=".md,.markdown,.txt,text/markdown,text/plain" hidden></label>
+          <button id="paste" type="button">Paste</button>
+          <button id="sample" type="button">Load sample</button>
+          <button id="clear" type="button">Clear</button>
+        </div>
+      </div>
+      <textarea id="md" spellcheck="false" placeholder="Type, paste or drop Markdown here…"></textarea>
+    </section>
+
+    <section class="pane options-pane" aria-label="Formatting options">
+      <div class="pane-head"><h2>Format</h2></div>
+      <form id="options" class="options">
+        <label>Template
+          <select name="template">
+            <option value="professional">Professional</option>
+            <option value="minimal">Minimal</option>
+            <option value="technical">Technical</option>
+          </select>
+        </label>
+        <label>Body font <select name="bodyFont"></select></label>
+        <label>Font size (pt) <input name="fontSize" type="number" min="8" max="20" step="0.5"></label>
+        <label>Heading colour <input name="headingColor" type="color"></label>
+        <label>Table header background <input name="tableHeaderBg" type="color"></label>
+        <label>Table borders
+          <select name="tableBorders">
+            <option value="all">All lines</option>
+            <option value="horizontal">Horizontal only</option>
+            <option value="none">None</option>
+          </select>
+        </label>
+        <label>Page size
+          <select name="pageSize">
+            <option value="A4">A4</option>
+            <option value="Letter">Letter</option>
+          </select>
+        </label>
+        <label>Margins (cm) <input name="marginCm" type="number" min="0.5" max="5" step="0.1"></label>
+        <button id="reset-format" type="button">Reset to template defaults</button>
+      </form>
+      <ul id="warnings" class="warnings"></ul>
+    </section>
+
+    <section class="pane preview-pane" aria-label="Document preview">
+      <div class="pane-head">
+        <div class="tabs" role="tablist">
+          <button role="tab" id="tab-html" aria-selected="true">HTML preview</button>
+          <button role="tab" id="tab-word" aria-selected="false">Word render</button>
+        </div>
+        <span id="page-info" class="muted"></span>
+      </div>
+      <p id="preview-note" class="note">Approximate HTML preview. Word decides the final line and page breaks.</p>
+      <div id="preview-scroll" class="preview-scroll">
+        <div id="preview" class="pages"></div>
+        <div id="word-view" class="word-view" hidden></div>
+      </div>
+    </section>
+  </main>
+</body>
+</html>
