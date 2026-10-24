@@ -5,6 +5,8 @@ import {
   convertMillimetersToTwip,
 } from 'docx';
 import { lex, safeUrl, isAbsoluteLink } from './markdown.js';
+import { mermaidToPngBuffer } from './mermaid-render.js';
+import { texToPngBuffer } from './latex-render.js';
 
 const HEADINGS = [HeadingLevel.HEADING_1, HeadingLevel.HEADING_2, HeadingLevel.HEADING_3,
   HeadingLevel.HEADING_4, HeadingLevel.HEADING_5, HeadingLevel.HEADING_6];
@@ -133,13 +135,55 @@ function walk(tokens, fn) {
 async function loadImages(tokens, ctx) {
   const hrefs = new Set();
   walk(tokens, (t) => { if (t.type === 'image' && safeUrl(t.href)) hrefs.add(t.href); });
-  await Promise.all([...hrefs].map(async (href) => {
-    try {
-      ctx.images.set(href, await fetchImage(href));
-    } catch (e) {
-      ctx.warnings.add(`Image not embedded (${e.message}): ${href.slice(0, 80)}`);
+
+  // Collect mermaid code blocks.
+  const mermaidSources = new Set();
+  walk(tokens, (t) => { if (t.type === 'code' && t.lang && t.lang.trim().toLowerCase() === 'mermaid') mermaidSources.add(t.text); });
+
+  // Collect math blocks and inlines.
+  const mathBlocks = new Set();
+  const mathInlines = new Set();
+  walk(tokens, (t) => {
+    if (t.type === 'mathBlock') mathBlocks.add(t.text);
+    else if (t.type === 'mathInline') mathInlines.add(t.text);
+    else if (t.type === 'code' && t.lang && ['math', 'latex', 'tex'].includes(t.lang.trim().toLowerCase())) {
+      mathBlocks.add(t.text.trim());
     }
-  }));
+  });
+
+  await Promise.all([
+    ...[...hrefs].map(async (href) => {
+      try {
+        ctx.images.set(href, await fetchImage(href));
+      } catch (e) {
+        ctx.warnings.add(`Image not embedded (${e.message}): ${href.slice(0, 80)}`);
+      }
+    }),
+    ...[...mermaidSources].map(async (source) => {
+      try {
+        const im = await mermaidToPngBuffer(source, ctx.st?.mermaid);
+        ctx.images.set(`mermaid:${source}`, { type: 'png', ...im });
+      } catch (e) {
+        ctx.warnings.add(`Mermaid diagram not embedded (${e.message}).`);
+      }
+    }),
+    ...[...mathBlocks].map(async (tex) => {
+      try {
+        const im = await texToPngBuffer(tex, true);
+        ctx.images.set(`math:block:${tex}`, { type: 'png', ...im });
+      } catch (e) {
+        ctx.warnings.add(`Math equation not embedded (${e.message}): ${tex.slice(0, 40)}`);
+      }
+    }),
+    ...[...mathInlines].map(async (tex) => {
+      try {
+        const im = await texToPngBuffer(tex, false);
+        ctx.images.set(`math:inline:${tex}`, { type: 'png', ...im });
+      } catch (e) {
+        ctx.warnings.add(`Inline math not embedded (${e.message}): ${tex.slice(0, 40)}`);
+      }
+    }),
+  ]);
 }
 
 async function fetchImage(href) {
@@ -214,6 +258,20 @@ function inlines(tokens, ctx, env, fmt = {}) {
       case 'em': out.push(...inlines(t.tokens, ctx, env, { ...fmt, italics: true })); break;
       case 'del': out.push(...inlines(t.tokens, ctx, env, { ...fmt, strike: true })); break;
       case 'codespan': out.push(run(t.text, { ...fmt, code: true }, ctx.st)); break;
+      case 'mathInline': {
+        const im = ctx.images.get(`math:inline:${t.text}`);
+        if (im) {
+          out.push(new ImageRun({
+            type: 'png',
+            data: im.data,
+            transformation: { width: Math.round(im.w), height: Math.round(im.h) },
+            altText: { name: 'Math formula', description: t.text, title: '' },
+          }));
+        } else {
+          out.push(new TextRun({ text: `$${t.text}$`, italics: true }));
+        }
+        break;
+      }
       case 'br': out.push(new TextRun({ break: 1 })); break;
       case 'image': out.push(imageRun(t, ctx, env)); break;
       case 'link': {
@@ -267,7 +325,77 @@ function blocks(tokens, ctx, env) {
       case 'text':
         out.push(para(t.tokens ? inlines(t.tokens, ctx, env) : [run(t.text, {}, ctx.st)], env));
         break;
+      case 'mathBlock': {
+        const im = ctx.images.get(`math:block:${t.text}`);
+        if (im) {
+          const maxW = (ctx.st.contentWidthMm - (env.indent / 1440) * 25.4) * (96 / 25.4);
+          const scale = Math.min(1, maxW / im.w);
+          out.push(new Paragraph({
+            alignment: AlignmentType.CENTER,
+            children: [new ImageRun({
+              type: 'png',
+              data: im.data,
+              transformation: { width: Math.round(im.w * scale), height: Math.round(im.h * scale) },
+              altText: { name: 'Math formula', description: t.text, title: '' },
+            })],
+            ...(env.indent ? { indent: { left: env.indent } } : {}),
+          }));
+        } else {
+          out.push(new Paragraph({
+            style: 'MdCode',
+            children: [new TextRun({ text: `$$ ${t.text} $$` })],
+            ...(env.indent ? { indent: { left: env.indent } } : {}),
+          }));
+        }
+        break;
+      }
       case 'code': {
+        const l = (t.lang || '').trim().toLowerCase();
+        // Math/LaTeX code block
+        if (['math', 'latex', 'tex'].includes(l)) {
+          const im = ctx.images.get(`math:block:${t.text.trim()}`);
+          if (im) {
+            const maxW = (ctx.st.contentWidthMm - (env.indent / 1440) * 25.4) * (96 / 25.4);
+            const scale = Math.min(1, maxW / im.w);
+            out.push(new Paragraph({
+              alignment: AlignmentType.CENTER,
+              children: [new ImageRun({
+                type: 'png',
+                data: im.data,
+                transformation: { width: Math.round(im.w * scale), height: Math.round(im.h * scale) },
+                altText: { name: 'Math formula', description: t.text, title: '' },
+              })],
+              ...(env.indent ? { indent: { left: env.indent } } : {}),
+            }));
+            break;
+          }
+        }
+        // Mermaid diagrams were pre-rendered to PNG; emit as a centred image paragraph.
+        if (l === 'mermaid') {
+          const im = ctx.images.get(`mermaid:${t.text}`);
+          if (im) {
+            const maxW = (ctx.st.contentWidthMm - (env.indent / 1440) * 25.4) * (96 / 25.4);
+            const scale = Math.min(1, maxW / im.w);
+            out.push(new Paragraph({
+              alignment: AlignmentType.CENTER,
+              children: [new ImageRun({
+                type: 'png',
+                data: im.data,
+                transformation: { width: Math.round(im.w * scale), height: Math.round(im.h * scale) },
+                altText: { name: 'Mermaid diagram', description: 'Mermaid diagram', title: '' },
+              })],
+              ...(env.indent ? { indent: { left: env.indent } } : {}),
+            }));
+          } else {
+            // Fallback: render as code block if PNG isn't available.
+            out.push(new Paragraph({
+              style: 'MdCode',
+              children: [new TextRun({ text: t.text })],
+              ...(env.indent ? { indent: { left: env.indent } } : {}),
+            }));
+          }
+          break;
+        }
         const lines = t.text.replace(/\t/g, '    ').split('\n');
         out.push(new Paragraph({
           style: 'MdCode',

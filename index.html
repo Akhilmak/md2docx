@@ -10,10 +10,27 @@
     "imports": {
       "marked": "https://cdn.jsdelivr.net/npm/marked@15.0.12/+esm",
       "docx": "https://cdn.jsdelivr.net/npm/docx@9.11.0/+esm",
-      "docx-preview": "https://cdn.jsdelivr.net/npm/docx-preview@0.4.1/+esm"
+      "docx-preview": "https://cdn.jsdelivr.net/npm/docx-preview@0.4.1/+esm",
+      "mermaid": "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs"
     }
   }
   </script>
+  <script>
+  window.MathJax = {
+    tex: {
+      inlineMath: [['$', '$'], ['\\(', '\\)']],
+      displayMath: [['$$', '$$'], ['\\[', '\\]']],
+      processEscapes: true,
+    },
+    svg: {
+      fontCache: 'local'
+    },
+    startup: {
+      typeset: false
+    }
+  };
+  </script>
+  <script id="MathJax-script" async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-svg.js"></script>
   <script type="module" src="js/app.js"></script>
 </head>
 <body>
@@ -70,6 +87,38 @@
           </select>
         </label>
         <label>Margins (cm) <input name="marginCm" type="number" min="0.5" max="5" step="0.1"></label>
+
+        <details class="mermaid-settings" id="mermaid-panel" open>
+          <summary><strong>Mermaid diagrams</strong></summary>
+          <div class="mermaid-fields">
+            <div class="field-row">
+              <label>Node fill <input name="mermaidNodeFill" type="color"></label>
+              <label>Node border <input name="mermaidNodeBorder" type="color"></label>
+            </div>
+            <div class="field-row">
+              <label>Border width (px) <input name="mermaidNodeBorderWidth" type="number" min="0.5" max="8" step="0.5"></label>
+              <label>Node text <input name="mermaidNodeText" type="color"></label>
+            </div>
+            <div class="field-row">
+              <label>Edge colour <input name="mermaidEdgeColor" type="color"></label>
+              <label>Edge width (px) <input name="mermaidEdgeWidth" type="number" min="0.5" max="8" step="0.5"></label>
+            </div>
+            <div class="field-row">
+              <label>Edge text <input name="mermaidEdgeText" type="color"></label>
+              <label>Secondary fill <input name="mermaidSecondaryFill" type="color"></label>
+            </div>
+            <div class="field-row">
+              <label>Font size (px) <input name="mermaidFontSize" type="number" min="8" max="28" step="1"></label>
+              <label>Max width (px) <input name="mermaidMaxWidth" type="number" min="200" max="1200" step="50"></label>
+            </div>
+            <label class="check-label">
+              <input name="mermaidMirrorActors" type="checkbox" checked>
+              <span>Show bottom actors / vertices</span>
+            </label>
+            <button id="reset-mermaid" type="button" class="btn-subtle">Reset diagram styles</button>
+          </div>
+        </details>
+
         <button id="reset-format" type="button">Reset to template defaults</button>
       </form>
       <ul id="warnings" class="warnings"></ul>

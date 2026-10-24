@@ -43,6 +43,29 @@ export const TEMPLATES = {
 // Settings the user can change; everything else comes from the template.
 export const USER_KEYS = ['bodyFont', 'fontSize', 'headingColor', 'tableHeaderBg', 'tableBorders', 'marginCm'];
 
+// Mermaid diagram configuration keys.
+export const MERMAID_KEYS = [
+  'mermaidNodeFill', 'mermaidNodeBorder', 'mermaidNodeBorderWidth', 'mermaidNodeText',
+  'mermaidEdgeColor', 'mermaidEdgeWidth', 'mermaidEdgeText',
+  'mermaidSecondaryFill', 'mermaidFontSize', 'mermaidMaxWidth', 'mermaidMirrorActors',
+];
+
+export function defaultMermaidSettings() {
+  return {
+    mermaidNodeFill:        '#E8F4FD',
+    mermaidNodeBorder:      '#5A9FD4',
+    mermaidNodeBorderWidth: 1.5,
+    mermaidNodeText:        '#1A1A1A',
+    mermaidEdgeColor:       '#555555',
+    mermaidEdgeWidth:       1.5,
+    mermaidEdgeText:        '#333333',
+    mermaidSecondaryFill:   '#FFF5CC',
+    mermaidFontSize:        13,
+    mermaidMaxWidth:        700,
+    mermaidMirrorActors:    true,
+  };
+}
+
 const HEADING_SCALE = [1.8, 1.45, 1.2, 1.1, 1, 1];
 
 const clamp = (v, lo, hi, dflt) => (Number.isFinite(+v) ? Math.min(hi, Math.max(lo, +v)) : dflt);
@@ -61,6 +84,7 @@ export function resolveStyle(settings) {
   const fontSize = clamp(settings.fontSize, 8, 20, t.fontSize);
   const marginCm = clamp(settings.marginCm, 0.5, 5, t.marginCm);
   const bodyFont = FONTS.includes(settings.bodyFont) ? settings.bodyFont : t.bodyFont;
+  const defaults = defaultMermaidSettings();
   return {
     ...t,
     bodyFont,
@@ -78,5 +102,19 @@ export function resolveStyle(settings) {
     contentHeightMm: page.heightMm - marginCm * 20,
     paraAfterPt: 8,
     lineSpacing: 1.15,
+    // Mermaid diagram style config.
+    mermaid: {
+      nodeFill:        color(settings.mermaidNodeFill,        defaults.mermaidNodeFill),
+      nodeBorder:      color(settings.mermaidNodeBorder,      defaults.mermaidNodeBorder),
+      nodeBorderWidth: clamp(settings.mermaidNodeBorderWidth, 0.5, 8, defaults.mermaidNodeBorderWidth),
+      nodeText:        color(settings.mermaidNodeText,        defaults.mermaidNodeText),
+      edgeColor:       color(settings.mermaidEdgeColor,       defaults.mermaidEdgeColor),
+      edgeWidth:       clamp(settings.mermaidEdgeWidth,       0.5, 8, defaults.mermaidEdgeWidth),
+      edgeText:        color(settings.mermaidEdgeText,        defaults.mermaidEdgeText),
+      secondaryFill:   color(settings.mermaidSecondaryFill,   defaults.mermaidSecondaryFill),
+      fontSize:        clamp(settings.mermaidFontSize,        8, 32, defaults.mermaidFontSize),
+      maxWidth:        clamp(settings.mermaidMaxWidth,        200, 1200, defaults.mermaidMaxWidth),
+      mirrorActors:    settings.mermaidMirrorActors !== false && settings.mermaidMirrorActors !== 'false',
+    },
   };
 }

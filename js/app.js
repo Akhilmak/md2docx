@@ -1,7 +1,9 @@
 // UI wiring: input, options, preview tabs, download.
-import { TEMPLATES, FONTS, USER_KEYS, defaultSettings, resolveStyle } from './templates.js';
+import { TEMPLATES, FONTS, USER_KEYS, MERMAID_KEYS, defaultSettings, defaultMermaidSettings, resolveStyle } from './templates.js';
 import { SAMPLE } from './sample.js';
 import { applyStyleVars, renderPaged } from './preview.js';
+import { renderMermaidSvg } from './mermaid-render.js';
+import { renderTexToSvg } from './latex-render.js';
 
 const $ = (id) => document.getElementById(id);
 const el = {
@@ -10,6 +12,7 @@ const el = {
   filename: $('filename'), download: $('download'), status: $('status'),
   tabHtml: $('tab-html'), tabWord: $('tab-word'), note: $('preview-note'), pageInfo: $('page-info'),
   scroll: $('preview-scroll'), preview: $('preview'), word: $('word-view'),
+  mermaidReset: $('reset-mermaid'),
 };
 
 const MAX_UPLOAD = 5 * 1024 * 1024;
@@ -21,9 +24,9 @@ function setStatus(msg, kind = '') {
   el.status.className = `status ${kind}`;
 }
 
-let toHtml, buildDocx;
+let toHtml, buildDocx, setMermaidConfig;
 try {
-  ({ toHtml } = await import('./markdown.js'));
+  ({ toHtml, setMermaidConfig } = await import('./markdown.js'));
   ({ buildDocx } = await import('./docx-export.js'));
 } catch (e) {
   console.error(e);
@@ -37,7 +40,7 @@ const store = {
   set(k, v) { try { localStorage.setItem(`md2docx.${k}`, v); } catch { /* storage unavailable */ } },
 };
 
-let settings = defaultSettings();
+let settings = { ...defaultSettings(), ...defaultMermaidSettings() };
 try { settings = { ...settings, ...JSON.parse(store.get('settings') || '{}') }; } catch { /* keep defaults */ }
 
 // ---------- options form ----------
@@ -46,24 +49,51 @@ form.bodyFont.append(...FONTS.map((f) => new Option(f, f)));
 
 function writeForm() {
   for (const k of ['template', 'pageSize', ...USER_KEYS]) form[k].value = settings[k];
+  for (const k of MERMAID_KEYS) {
+    if (form[k]) {
+      if (form[k].type === 'checkbox') form[k].checked = Boolean(settings[k] ?? defaultMermaidSettings()[k]);
+      else form[k].value = settings[k] ?? defaultMermaidSettings()[k];
+    }
+  }
 }
 function readForm() {
   for (const k of ['template', 'pageSize', ...USER_KEYS]) settings[k] = form[k].value;
+  for (const k of MERMAID_KEYS) {
+    if (form[k]) {
+      if (form[k].type === 'checkbox') settings[k] = form[k].checked;
+      else if (form[k].type === 'number') settings[k] = Number(form[k].value);
+      else settings[k] = form[k].value;
+    }
+  }
   store.set('settings', JSON.stringify(settings));
 }
 
-el.options.addEventListener('input', (e) => {
+function handleOptionUpdate(e) {
   if (e.target.name === 'template') {
     const pageSize = form.pageSize.value;
-    settings = { ...defaultSettings(e.target.value), pageSize };
+    const mm = { ...defaultMermaidSettings() };
+    settings = { ...defaultSettings(e.target.value), pageSize, ...mm };
     writeForm();
   }
   readForm();
   schedule();
-});
+}
+
+el.options.addEventListener('input', handleOptionUpdate);
+el.options.addEventListener('change', handleOptionUpdate);
 el.options.addEventListener('submit', (e) => e.preventDefault());
+
 el.reset.addEventListener('click', () => {
-  settings = { ...defaultSettings(settings.template), pageSize: settings.pageSize };
+  settings = { ...defaultSettings(settings.template), pageSize: settings.pageSize, ...defaultMermaidSettings() };
+  writeForm();
+  readForm();
+  schedule();
+});
+
+// Mermaid reset button.
+el.mermaidReset?.addEventListener('click', () => {
+  const mm = defaultMermaidSettings();
+  Object.assign(settings, mm);
   writeForm();
   readForm();
   schedule();
@@ -128,11 +158,73 @@ function fitZoom(st) {
   el.word.style.zoom = zoom.toFixed(3);
 }
 
+/**
+ * Replace every .mermaid-block placeholder with an inline SVG wrapper.
+ * Rendering the SVG directly ensures 100% native vector quality in the HTML preview,
+ * with full text readability, proper vertex/edge styling, and transparent backgrounds.
+ */
+async function renderMermaidDiagrams(container, mermaidCfg) {
+  const blocks = [...container.querySelectorAll('.mermaid-block[data-source]')];
+  if (!blocks.length) return false;
+  let changed = false;
+  await Promise.allSettled(blocks.map(async (div) => {
+    try {
+      const source = decodeURIComponent(escape(atob(div.dataset.source)));
+      const maxW = mermaidCfg?.maxWidth || 700;
+      const svg = await renderMermaidSvg(source, { ...mermaidCfg, maxWidth: maxW });
+      const wrapper = document.createElement('div');
+      wrapper.className = 'mermaid-wrapper';
+      wrapper.innerHTML = svg;
+      const svgEl = wrapper.querySelector('svg');
+      if (svgEl) {
+        svgEl.classList.add('mermaid-svg');
+        svgEl.style.maxWidth = `${maxW}px`;
+        svgEl.style.width = '100%';
+        svgEl.style.height = 'auto';
+        svgEl.style.display = 'block';
+        svgEl.style.margin = '8px auto';
+      }
+      div.replaceWith(wrapper);
+      changed = true;
+    } catch (e) {
+      div.textContent = `⚠ Mermaid error: ${e.message}`;
+      div.style.cssText = 'color:#c00;font-style:italic;padding:8px;';
+    }
+  }));
+  return changed;
+}
+
+/**
+ * Render LaTeX math expressions (.math-block, .math-inline) using MathJax SVG.
+ */
+async function renderMathExpressions(container) {
+  const elements = [
+    ...container.querySelectorAll('.math-block[data-tex], .math-inline[data-tex]'),
+  ];
+  if (!elements.length) return false;
+  let changed = false;
+  await Promise.allSettled(elements.map(async (elem) => {
+    try {
+      const tex = decodeURIComponent(escape(atob(elem.dataset.tex)));
+      const isDisplay = elem.classList.contains('math-block');
+      const { svg } = await renderTexToSvg(tex, isDisplay);
+      elem.innerHTML = svg;
+      elem.removeAttribute('data-tex');
+      changed = true;
+    } catch (e) {
+      elem.textContent = `⚠ Math error: ${e.message}`;
+      elem.style.color = '#c00';
+    }
+  }));
+  return changed;
+}
+
 let relaidOut = false;
 function render() {
   const md = el.md.value;
   store.set('markdown', md);
   const st = resolveStyle(settings);
+  if (setMermaidConfig) setMermaidConfig(st.mermaid);
   fitZoom(st);
   if (view === 'word') { renderWord(st); return; }
   try {
@@ -141,6 +233,7 @@ function render() {
     el.pageInfo.textContent = `≈ ${pages} page${pages > 1 ? 's' : ''}`;
     if (md.length > LARGE_INPUT) setStatus('Large document: the preview updates more slowly.');
     else if (el.status.classList.contains('error') || /Loading/.test(el.status.textContent)) setStatus('Ready.');
+
     // Images change block heights once loaded, so paginate again once.
     const pending = [...el.preview.querySelectorAll('img')].filter((i) => !i.complete);
     if (pending.length && !relaidOut) {
@@ -150,6 +243,17 @@ function render() {
     } else {
       relaidOut = false;
     }
+
+    // Render any uncached mermaid diagrams and math expressions asynchronously.
+    Promise.all([
+      renderMermaidDiagrams(el.preview, st.mermaid),
+      renderMathExpressions(el.preview),
+    ]).then(([mmChanged, mathChanged]) => {
+      if ((mmChanged || mathChanged) && !relaidOut) {
+        relaidOut = true;
+        render();
+      }
+    }).catch((e) => console.warn('Preview async render error:', e));
   } catch (e) {
     console.error(e);
     setStatus(`Preview failed: ${e.message}`, 'error');
@@ -239,7 +343,7 @@ el.download.addEventListener('click', async () => {
 });
 
 // ---------- start ----------
-if (!TEMPLATES[settings.template]) settings = defaultSettings();
+if (!TEMPLATES[settings.template]) settings = { ...defaultSettings(), ...defaultMermaidSettings() };
 writeForm();
 el.md.value = store.get('markdown') ?? SAMPLE;
 el.download.disabled = false;
